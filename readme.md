@@ -48,8 +48,11 @@
    ```
 ## 截图
 ![1](https://github.com/52op/ddns_manager/blob/master/preview_images/1.png)
+
 ![2](https://github.com/52op/ddns_manager/blob/master/preview_images/2.png)
+
 ![3](https://github.com/52op/ddns_manager/blob/master/preview_images/3.png)
+
 ![4](https://github.com/52op/ddns_manager/blob/master/preview_images/4.png)
 
 ## 贡献
