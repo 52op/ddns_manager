@@ -52,6 +52,6 @@
 
 ## 许可证
 
-本项目采用MIT许可证。详情请见[LICENSE](https://github.com/52op/ddns_manager?tab=MIT-1-ov-file)文件。
+本项目采用MIT许可证。详情请见[LICENSE](https://github.com/52op/ddns_manager?tab=License-1-ov-file)文件。
 
 
