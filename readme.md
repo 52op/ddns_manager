@@ -13,7 +13,7 @@
 - 当然得益于windows不错的向下兼容特性,win10 win11等也是没问题的  
 - 开发它的原因其一是想让我另外一个小工具 [file_share](https://github.com/52op/file_share)
   在没有公网IPV4的情况下，可以让主机也能随时提供文件共享服务
-- **效果展示:** [http://v6.sztcrs.com](http://v6.sztcrs.com)
+- **效果展示:** [http://v6.sztcrs.com:12345](http://v6.sztcrs.com:12345) (你的网络必须支持ipv6才能访问)
 
 
 ## 功能特性
