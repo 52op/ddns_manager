@@ -1,0 +1,9 @@
+/build/
+/ddns_manager_venv/
+/deploy/logs/
+/dist/
+/logs/
+/config.enc
+/dns_manager.log
+/.idea/
+

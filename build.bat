@@ -1,0 +1,6 @@
+@echo off
+echo remove build files...
+rmdir /s /q build dist
+echo start build...
+pyinstaller build_config.spec --clean
+echo build finished！
