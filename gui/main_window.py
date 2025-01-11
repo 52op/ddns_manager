@@ -21,6 +21,7 @@ from core.dns_updater import DNSUpdater
 from utils.validators import InputValidator
 from ctypes import windll, c_int, byref, sizeof, c_uint
 import platform
+from loguru import logger
 
 
 class UpdateThread(QThread):
@@ -71,53 +72,47 @@ class UpdateThread(QThread):
             self._loop.stop()
 
 
+class LoguruHandler(logging.Handler):
+    def emit(self, record):
+        # 将 logging 的日志记录转发到 loguru
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        logger.opt(depth=6, exception=record.exc_info).log(level, record.getMessage())
+
+
 class MainWindow(QMainWindow):
     update_requested = Signal()
 
     def setup_logging(self):
+        # 获取程序运行目录
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
         else:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            base_dir = os.path.dirname(os.path.abspath(__file__))
 
+        # 创建 logs 目录
         log_dir = os.path.join(base_dir, 'logs')
         os.makedirs(log_dir, exist_ok=True)
 
-        # 使用固定的基础日志文件名
-        log_file = os.path.join(log_dir, 'window.log')
-
-        handler = TimedRotatingFileHandler(
-            log_file,
-            when='midnight',
-            interval=1,
-            backupCount=30,
-            encoding='utf-8'
+        # 配置 loguru 日志处理器
+        logger.add(
+            os.path.join(log_dir, 'window_{time:YYYYMMDD}.log'),  # 日志文件名带当天日期
+            rotation="00:00",  # 每天午夜轮换
+            retention="30 days",  # 保留最近30天的日志
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+            level="INFO"
         )
 
-        def namer(default_name):
-            # 从默认名称中提取日期
-            date_str = default_name.split('.')[-1]
-            # 转换日期格式
-            try:
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                new_date_str = date_obj.strftime('%Y%m%d')
-                # 返回新的文件名格式
-                return f"window_{new_date_str}.log"
-            except:
-                return default_name
+        # 配置 logging
+        logging.basicConfig(level=logging.INFO)
+        # 手动添加 LoguruHandler 将 loguru 适配到 logging 模块
+        logging.getLogger().addHandler(LoguruHandler())
 
-        handler.namer = namer
-
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-
-        logger = logging.getLogger('window')
-        # 清除现有的handlers
-        logger.handlers = []
-        logger.setLevel(logging.INFO)
-        logger.addHandler(handler)
-
-        return logger
+        # 返回标准的 logging.Logger 对象
+        return logging.getLogger()
 
     def __init__(self):
         super().__init__()

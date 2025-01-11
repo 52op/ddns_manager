@@ -75,6 +75,7 @@ class LogViewerDialog(QDialog):
             self.parent().set_light_theme(self)
 
     def search_logs(self):
+        """按日期搜索日志函数, 支持当天固定window.log service.log 或 带日期方式 window_20250111.log查找"""
         keyword = self.search_input.text()
         start_date = self.start_date.date().toPython()
         end_date = self.end_date.date().toPython()

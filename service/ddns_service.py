@@ -10,6 +10,18 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from core.config_manager import ConfigManager
 from core.dns_updater import DNSUpdater
+from loguru import logger
+
+
+class LoguruHandler(logging.Handler):
+    def emit(self, record):
+        # 将 logging 的日志记录转发到 loguru
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        logger.opt(depth=6, exception=record.exc_info).log(level, record.getMessage())
 
 
 class DnsUpdateService(win32serviceutil.ServiceFramework):
@@ -44,51 +56,26 @@ class DnsUpdateService(win32serviceutil.ServiceFramework):
         else:
             base_dir = os.path.dirname(os.path.abspath(__file__))
 
-        # 创建logs目录
+        # 创建 logs 目录
         log_dir = os.path.join(base_dir, 'logs')
         os.makedirs(log_dir, exist_ok=True)
 
-        # 使用固定基础日志文件名
-        log_file = os.path.join(log_dir, 'service.log')
-
-        # 配置日志处理器
-        file_handler = TimedRotatingFileHandler(
-            log_file,
-            when='midnight',
-            interval=1,
-            backupCount=30,
-            encoding='utf-8'
+        # 配置 loguru 日志处理器
+        logger.add(
+            os.path.join(log_dir, 'service_{time:YYYYMMDD}.log'),  # 日志文件名带当天日期
+            rotation="00:00",  # 每天午夜轮换
+            retention="30 days",  # 保留最近30天的日志
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+            level="INFO"
         )
 
-        # 自定义日志文件命名函数
-        def namer(default_name):
-            date_str = default_name.split('.')[-1]
-            try:
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                new_date_str = date_obj.strftime('%Y%m%d')
-                return f"service_{new_date_str}.log"
-            except:
-                return default_name
+        # 配置 logging
+        logging.basicConfig(level=logging.INFO)
+        # 手动添加 LoguruHandler 将 loguru 适配到 logging 模块
+        logging.getLogger().addHandler(LoguruHandler())
 
-        file_handler.namer = namer
-
-        # 添加控制台输出处理器
-        console_handler = logging.StreamHandler()
-
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
-
-        # 获取根日志记录器并清除现有处理器
-        logger = logging.getLogger()
-        logger.handlers = []
-        logger.setLevel(logging.INFO)
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-
-        logging.info('服务初始化完成')
-
-        return logger
+        # 返回标准的 logging.Logger 对象
+        return logging.getLogger()
 
     async def update_all_records(self):
         try:
