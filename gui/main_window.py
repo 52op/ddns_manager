@@ -86,36 +86,10 @@ class LoguruHandler(logging.Handler):
 class MainWindow(QMainWindow):
     update_requested = Signal()
 
-    def setup_logging(self):
-        # 获取程序运行目录
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-
-        # 创建 logs 目录
-        log_dir = os.path.join(base_dir, 'logs')
-        os.makedirs(log_dir, exist_ok=True)
-
-        # 配置 loguru 日志处理器
-        logger.add(
-            os.path.join(log_dir, 'window_{time:YYYYMMDD}.log'),  # 日志文件名带当天日期
-            rotation="00:00",  # 每天午夜轮换
-            retention="30 days",  # 保留最近30天的日志
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-            level="INFO"
-        )
-
-        # 配置 logging
-        logging.basicConfig(level=logging.INFO)
-        # 手动添加 LoguruHandler 将 loguru 适配到 logging 模块
-        logging.getLogger().addHandler(LoguruHandler())
-
-        # 返回标准的 logging.Logger 对象
-        return logging.getLogger()
-
     def __init__(self):
         super().__init__()
+        # 初始化 logger 属性
+        self.logger = None
         self.base_dir = ''
         if getattr(sys, 'frozen', False):
             # 打包后的路径
@@ -125,15 +99,69 @@ class MainWindow(QMainWindow):
             self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.icon_path = os.path.join(self.base_dir, 'resources', 'icon.ico')
         self.is_dark_theme = False
+        # 初始化日志系统
+        self.setup_logging()
         self.config_manager = ConfigManager()
         self.dns_updater = DNSUpdater()
         self.service_controller = ServiceController()
         self.update_thread = None
-        self.logger = self.setup_logging()
         self.dns_updater = DNSUpdater(logger=self.logger)   # 向dns_update传入logger
         self.setup_ui()
         self.refresh_table()
         self.setup_tray_icon()
+
+    def setup_logging(self):
+        """配置日志系统"""
+        try:
+            # 获取程序运行目录
+            if getattr(sys, 'frozen', False):
+                base_dir = os.path.dirname(sys.executable)
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+            # 创建 logs 目录
+            log_dir = os.path.join(base_dir, 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+
+            # 设置 loguru 的默认格式
+            format_str_debug = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+                         "<level>{level: <8}</level> | "
+                         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> \n - "
+                         "<level>{message}</level>")
+            format_str = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+                          "<level>{level: <8}</level> | "
+                          "<level>{message}</level>")
+
+            # 移除所有现有的处理器
+            logger.remove()
+
+            # 添加控制台输出
+            logger.add(sys.stdout, format=format_str, level="INFO")
+
+            # 添加文件输出
+            log_file = os.path.join(log_dir, "window_{time:YYYYMMDD}.log")
+            logger.add(
+                log_file,
+                rotation="00:00",  # 每天午夜轮换
+                retention="30 days",  # 保留30天
+                format=format_str,
+                level="INFO",
+                encoding="utf-8"
+            )
+
+            # 配置标准日志
+            logging.basicConfig(level=logging.INFO)
+            # 添加 LoguruHandler
+            logging.getLogger().addHandler(LoguruHandler())
+
+            # 设置实例的 logger
+            self.logger = logger.bind(name="MainWindow")
+            # self.logger.info(f"日志系统初始化完成，日志目录: {log_dir}")
+
+        except Exception as e:
+            print(f"设置日志系统时出错: {str(e)}")
+            # 确保即使出错也设置一个默认的 logger
+            self.logger = logger.bind(name="MainWindow")
 
     def setup_ui(self):
         self.setWindowTitle("DM动态IP自动解析工具-腾讯云DnsPod专用")
@@ -519,18 +547,55 @@ class MainWindow(QMainWindow):
                 )
                 self.refresh_table()
 
+    async def delete_account_records_async(self, client, account):
+        """异步删除账号下所有记录"""
+        for domain, configs in account.domains.items():
+            for config in configs:
+                try:
+                    await self.dns_updater.delete_dns_records(
+                        client, domain, config.subdomain, config.record_type
+                    )
+                except Exception as e:
+                    self.logger.error(f"删除腾讯云域名记录时出错: {str(e)}")
+
     def delete_account(self, account_name):
-        """删除账号"""
+        """删除账号及其所有DNS记录"""
         reply = QMessageBox.question(
             self,
             "确认删除",
-            f"确定要删除账号 {account_name} 吗？\n点击确定，删除{account_name}对应的所有域名",
+            f"确定要删除账号 {account_name} 吗？\n"
+            f"这将同时删除该账号下所有域名以及其在腾讯云对应的解析记录",
             QMessageBox.Yes | QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
-            self.config_manager.remove_account(account_name)
-            self.refresh_table()
+            try:
+                account = self.config_manager.accounts[account_name]
+                # 创建DNS客户端
+                from tencentcloud.dnspod.v20210323 import dnspod_client
+                from tencentcloud.common import credential
+                cred = credential.Credential(account.secret_id, account.secret_key)
+                client = dnspod_client.DnspodClient(cred, "")
+
+                # 使用事件循环删除所有记录
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(
+                    self.delete_account_records_async(client, account)
+                )
+
+            except Exception as e:
+                self.logger.error(f"删除账号下对应腾讯云域名记录出错: {str(e)}")
+
+            finally:
+                # 删除本地配置
+                self.config_manager.remove_account(account_name)
+                self.config_manager.save_config()
+                self.refresh_table()
+                QMessageBox.information(
+                    self,
+                    "删除成功",
+                    f"账号 {account_name} 及其所有DNS记录已删除"
+                )
 
     def check_service_running(self) -> bool:
         import win32serviceutil

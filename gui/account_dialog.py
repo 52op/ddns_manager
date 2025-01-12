@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import webbrowser
@@ -9,6 +10,7 @@ from PySide2.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit,
 from PySide2.QtCore import Qt
 
 from core.config_manager import AccountConfig
+from core.dns_updater import DNSUpdater
 from .base_dialog import ProtectedDialog
 
 
@@ -17,6 +19,7 @@ class AccountDialog(ProtectedDialog):
         super().__init__(parent)
         self.setup_ui()
         self.apply_theme()
+        self.logger = self.parent().logger
         # 添加表格项变化信号连接
         self.domains_table.itemChanged.connect(self.on_domain_item_changed)
 
@@ -231,8 +234,54 @@ class AccountDialog(ProtectedDialog):
                 self.domains_table.setCellWidget(row, 3, line_combo)
                 self.domains_table.setCellWidget(row, 4, enabled_check)
 
+    async def delete_dns_record_async(self, client, domain, subdomain, record_type):
+        """异步删除DNS记录"""
+        dns_updater = DNSUpdater(logger=self.logger)
+        await dns_updater.delete_dns_records(client, domain, subdomain, record_type)
+
     def remove_domain(self):
-        """删除选中的域名"""
+        """删除选中的域名及其DNS记录"""
         current_row = self.domains_table.currentRow()
         if current_row >= 0:
-            self.domains_table.removeRow(current_row)
+            domain = self.domains_table.item(current_row, 0).text()
+            subdomain = self.domains_table.item(current_row, 1).text()
+            record_type = self.domains_table.cellWidget(current_row, 2).currentText()
+
+            reply = QMessageBox.question(
+                self,
+                "确认删除",
+                f"确定要删除域名记录 {subdomain}.{domain} ({record_type}) 吗？\n"
+                f"这将同时删除腾讯云上的解析记录",
+                QMessageBox.Yes | QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                try:
+                    # 获取账号信息
+                    secret_id = self.secret_id_edit.text()
+                    secret_key = self.secret_key_edit.text()
+
+                    # 创建DNS客户端
+                    from tencentcloud.dnspod.v20210323 import dnspod_client
+                    from tencentcloud.common import credential
+
+                    cred = credential.Credential(secret_id, secret_key)
+                    client = dnspod_client.DnspodClient(cred, "")
+
+                    # 使用事件循环删除记录
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(
+                        self.delete_dns_record_async(client, domain, subdomain, record_type)
+                    )
+
+                except Exception as e:
+                    self.logger.error(f"删除腾讯云域名记录时出错: {str(e)}")
+
+                finally:
+                    # 从表格中删除
+                    self.domains_table.removeRow(current_row)
+                    QMessageBox.information(
+                        self,
+                        "删除成功",
+                        f"本地域名记录 {subdomain}.{domain} 已删除,保存生效"
+                    )
