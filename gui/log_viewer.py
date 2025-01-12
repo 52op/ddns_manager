@@ -16,6 +16,7 @@ class LogViewerDialog(QDialog):
         self.resize(800, 600)
         self.setup_ui()
         self.apply_theme()
+        self.search_logs()
 
     def setup_ui(self):
         if getattr(sys, 'frozen', False):
@@ -75,65 +76,63 @@ class LogViewerDialog(QDialog):
             self.parent().set_light_theme(self)
 
     def search_logs(self):
-        """按日期搜索日志函数, 支持当天固定window.log service.log 或 带日期方式 window_20250111.log查找"""
-        keyword = self.search_input.text()
-        start_date = self.start_date.date().toPython()
-        end_date = self.end_date.date().toPython()
-        log_type = self.log_type.currentText()
-        today = datetime.now().date()
+        """按日期搜索日志函数，适配新的日志命名格式 window_YYYYMMDD.log 和 service_YYYYMMDD.log"""
+        try:
+            keyword = self.search_input.text()
+            start_date = self.start_date.date().toPython()
+            end_date = self.end_date.date().toPython()
+            log_type = self.log_type.currentText()
 
-        # 获取日志目录
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-        log_dir = os.path.join(base_dir, 'logs')
-
-        # 初始化 list 以存储所有匹配的日志文件
-        log_files_to_check = []
-
-        # 处理服务日志
-        if log_type in ["所有日志", "服务日志"]:
-            # 如果在日期范围内，则添加当天的日志文件
-            if start_date <= today <= end_date:
-                current_log = os.path.join(log_dir, "service.log")
-                if os.path.exists(current_log):
-                    log_files_to_check.append(current_log)
-            # 添加历史日志文件
-            log_files_to_check.extend(glob.glob(os.path.join(log_dir, "service_*.log")))
-
-        # 处理窗口日志
-        if log_type in ["所有日志", "窗口日志"]:
-            # 如果在日期范围内，则添加当天的日志文件
-            if start_date <= today <= end_date:
-                current_log = os.path.join(log_dir, "window.log")
-                if os.path.exists(current_log):
-                    log_files_to_check.append(current_log)
-            # 添加历史日志文件
-            log_files_to_check.extend(glob.glob(os.path.join(log_dir, "window_*.log")))
-
-        results = []
-        for log_file in log_files_to_check:
-            file_name = os.path.basename(log_file)
-
-            # 确定文件日期
-            if file_name in ["service.log", "window.log"]:
-                file_date = today
+            # 获取日志目录
+            if getattr(sys, 'frozen', False):
+                base_dir = os.path.dirname(sys.executable)
             else:
-                # 从历史日志文件中提取日期
-                file_date_str = file_name.split('_')[1].split('.')[0]
-                file_date = datetime.strptime(file_date_str, "%Y%m%d").date()
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-            # 检查文件日期是否在范围内
-            if start_date <= file_date <= end_date:
-                try:
-                    with open(log_file, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            if keyword.lower() in line.lower():
-                                results.append(line.strip())
-                except Exception as e:
-                    results.append(f"Error reading {file_name}: {str(e)}")
+            log_dir = os.path.join(base_dir, 'logs')
+            results = []
 
-        # 显示结果
-        self.log_display.setText('\n'.join(results))
+            # 逐日遍历日期范围
+            current_date = start_date
+            while current_date <= end_date:
+                date_str = current_date.strftime("%Y%m%d")
+
+                # 根据选择的日志类型确定要搜索的文件
+                log_files_to_check = []
+
+                if log_type in ["所有日志", "窗口日志"]:
+                    window_log = os.path.join(log_dir, f"window_{date_str}.log")
+                    print(f"{window_log}")
+                    if os.path.exists(window_log):
+                        log_files_to_check.append(window_log)
+
+                if log_type in ["所有日志", "服务日志"]:
+                    service_log = os.path.join(log_dir, f"service_{date_str}.log")
+                    if os.path.exists(service_log):
+                        log_files_to_check.append(service_log)
+
+                # 搜索当天的日志文件
+                for log_file in log_files_to_check:
+                    try:
+                        with open(log_file, 'r', encoding='utf-8') as f:
+                            file_name = os.path.basename(log_file)
+                            # 确定日志来源标识
+                            log_source = "服务" if file_name.startswith("service_") else "窗口"
+                            for line in f:
+                                if keyword.lower() in line.lower():
+                                    # 添加文件名标识到每行日志前
+                                    results.append(f"[{log_source}] {line.strip()}")
+                    except Exception as e:
+                        results.append(f"Error reading {os.path.basename(log_file)}: {str(e)}")
+
+                # 移到下一天
+                current_date = current_date.replace(day=current_date.day + 1)
+
+            # 显示结果
+            if results:
+                self.log_display.setText('\n'.join(results))
+            else:
+                self.log_display.setText("未找到匹配的日志记录")
+
+        except Exception as e:
+            self.log_display.setText(f"搜索日志时出错: {str(e)}")
